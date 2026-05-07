@@ -1,0 +1,37 @@
+{
+  "name": "stamp-action",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BA | Stamp GitHub Action — anchor file hashes on Polygon + Bitcoin via OpenTimestamps inside CI.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
+    "lint": "tsc --noEmit",
+    "package": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BA-BlockchainAnalysis/stamp-action.git"
+  },
+  "keywords": [
+    "actions",
+    "blockchain",
+    "timestamp",
+    "polygon",
+    "opentimestamps",
+    "bitcoin",
+    "evidence",
+    "compliance"
+  ],
+  "author": "Aletheia Tech Ltd <contact@bastamp.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/glob": "^0.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@vercel/ncc": "^0.38.3",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,52 @@
+name: 'BA | Stamp'
+description: 'Anchor file hashes on Polygon + Bitcoin via OpenTimestamps. Legal-grade timestamps for CI artifacts.'
+author: 'Aletheia Tech Ltd'
+
+branding:
+  icon: 'clock'
+  color: 'green'
+
+inputs:
+  api-key:
+    description: 'BA Stamp API key (ba_live_...). Mint at https://bastamp.com/account/api-keys.'
+    required: true
+  files:
+    description: 'Newline-separated globs of files to stamp. Each matched file is hashed locally; only the SHA-256 is sent.'
+    required: true
+  jurisdiction:
+    description: 'ISO 3166-1 alpha-2 country code applied to the certificate legal framing (e.g. IT, US, DE).'
+    required: false
+  locale:
+    description: 'BCP-47 locale for the certificate PDF (e.g. en, it, fr).'
+    required: false
+    default: 'en'
+  wait-for-anchor:
+    description: 'If true, poll until every stamp is anchored on Polygon (~5 min). Adds CI minutes; defaults to false.'
+    required: false
+    default: 'false'
+  poll-timeout-seconds:
+    description: 'Maximum seconds to wait when wait-for-anchor=true. Default 900 (15 min).'
+    required: false
+    default: '900'
+  output-json:
+    description: 'Path to write the proofs JSON output. Default: bastamp-proofs.json.'
+    required: false
+    default: 'bastamp-proofs.json'
+  api-base:
+    description: 'Override API base URL. Defaults to https://bastamp.com/api/v1.'
+    required: false
+    default: 'https://bastamp.com/api/v1'
+
+outputs:
+  stamps:
+    description: 'JSON-encoded array of stamped items: { ownershipId, stampId, contentHash, fileName, anchored, txHash? }.'
+  pending-count:
+    description: 'Number of stamps still pending. 0 when wait-for-anchor=true completed successfully.'
+  anchored-count:
+    description: 'Number of stamps fully anchored on Polygon at exit.'
+  credits-charged:
+    description: 'Total credits charged across all batches in this run.'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
