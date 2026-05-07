@@ -1,0 +1,52 @@
+name: End-to-end smoke test
+
+# Manual trigger only — running this charges credits from BASTAMP_API_KEY's
+# account. Don't wire it on push or schedule.
+on:
+  workflow_dispatch:
+
+jobs:
+  stamp:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate unique test artifacts
+        run: |
+          mkdir -p test-artifacts
+          printf "smoke test artifact A — run %s\n" "${{ github.run_id }}" > test-artifacts/a.txt
+          printf "smoke test artifact B — run %s — %s\n" "${{ github.run_id }}" "$(date -u +%s%N)" > test-artifacts/b.txt
+          ls -la test-artifacts
+          sha256sum test-artifacts/*.txt
+
+      # Reference the action via local path so the test exercises the *current*
+      # checkout, not the published @v1 tag. Catches drift between src/ and
+      # dist/ that the lint job might miss.
+      - name: Run stamp-action against itself
+        id: stamp
+        uses: ./
+        with:
+          api-key: ${{ secrets.BASTAMP_API_KEY }}
+          files: |
+            test-artifacts/*.txt
+          jurisdiction: IT
+          locale: en
+          wait-for-anchor: false
+
+      - name: Show outputs
+        run: |
+          echo "pending-count : ${{ steps.stamp.outputs.pending-count }}"
+          echo "anchored-count: ${{ steps.stamp.outputs.anchored-count }}"
+          echo "credits-charged: ${{ steps.stamp.outputs.credits-charged }}"
+          echo
+          echo "--- proofs JSON ---"
+          cat bastamp-proofs.json
+
+      - name: Upload proofs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bastamp-proofs-${{ github.run_id }}
+          path: bastamp-proofs.json
+          retention-days: 7
