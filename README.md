@@ -4,6 +4,15 @@ Anchor file hashes on **Polygon + Bitcoin via OpenTimestamps** from any GitHub w
 
 Use it to timestamp release artifacts, build outputs, audit logs, or any file you need to prove existed at a specific moment in time. Each stamp produces a tamper-proof PDF certificate with jurisdiction-specific legal framing (eIDAS Art. 41, IT Art. 2712 c.c., US FRE 901(b)(9), and 30+ more).
 
+### How the two anchors work
+
+BA | Stamp anchors every batch on **two chains**:
+
+- **Polygon** — primary anchor. Confirms in **~5 minutes** at the next batch tick. The stamp `status` flips to `anchored` and a tx hash is recorded.
+- **Bitcoin via OpenTimestamps** — secondary, redundant anchor. Confirms **asynchronously, typically 1–6 hours** later, when the OpenTimestamps calendar's transaction is mined into a Bitcoin block.
+
+The `wait-for-anchor` input below polls **only the Polygon anchor**. The Bitcoin anchor lands on its own later and shows up automatically on the certificate when re-downloaded. To be notified when the Bitcoin anchor confirms, subscribe to the [`ots.upgraded` webhook](https://bastamp.com/docs/api) instead of waiting in CI.
+
 [bastamp.com](https://bastamp.com) · [API reference](https://bastamp.com/docs/api) · operated by Aletheia Tech Ltd.
 
 ## Quickstart
@@ -42,7 +51,7 @@ That's it. The action hashes each file, posts the hashes to BA Stamp, and writes
 | `files` | yes | — | Newline-separated globs. |
 | `jurisdiction` | no | — | ISO 3166-1 alpha-2 country code (e.g. `IT`, `US`). Drives the legal-framing block on the certificate PDF. |
 | `locale` | no | `en` | BCP-47 locale for the PDF (`en`, `it`, `fr`, etc.). |
-| `wait-for-anchor` | no | `false` | If `true`, poll until every stamp is anchored on Polygon (~5 min). Adds CI minutes; consider only for steps that need the cert immediately. |
+| `wait-for-anchor` | no | `false` | If `true`, poll until every stamp is **Polygon-anchored** (~5 min). The Bitcoin/OTS anchor completes asynchronously after 1–6 hours and is **not** waited on — subscribe to the `ots.upgraded` webhook for that. Adds CI minutes; only enable for steps that need the certificate immediately. |
 | `poll-timeout-seconds` | no | `900` | How long to wait when `wait-for-anchor=true`. |
 | `output-json` | no | `bastamp-proofs.json` | Where to write the proofs JSON. |
 | `api-base` | no | `https://bastamp.com/api/v1` | Override for testing or self-host. |
@@ -52,8 +61,8 @@ That's it. The action hashes each file, posts the hashes to BA Stamp, and writes
 | Name | Description |
 |---|---|
 | `stamps` | JSON-encoded array: `[{ ownershipId, stampId, contentHash, fileName, anchored, txHash, chain, blockNumber }]` |
-| `pending-count` | Stamps still pending at exit. `0` when `wait-for-anchor=true` succeeded. |
-| `anchored-count` | Stamps fully anchored at exit. |
+| `pending-count` | Stamps not yet Polygon-anchored at exit. `0` when `wait-for-anchor=true` succeeded. |
+| `anchored-count` | Stamps Polygon-anchored at exit. (Bitcoin/OTS confirmation lands later asynchronously.) |
 | `credits-charged` | Total credits charged for this run. |
 
 ## Idempotency — safe to retry

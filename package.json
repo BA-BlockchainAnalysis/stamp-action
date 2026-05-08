@@ -1,6 +1,6 @@
 {
   "name": "stamp-action",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "BA | Stamp GitHub Action — anchor file hashes on Polygon + Bitcoin via OpenTimestamps inside CI.",
   "main": "dist/index.js",

@@ -21,7 +21,7 @@ inputs:
     required: false
     default: 'en'
   wait-for-anchor:
-    description: 'If true, poll until every stamp is anchored on Polygon (~5 min). Adds CI minutes; defaults to false.'
+    description: 'If true, poll until every stamp is Polygon-anchored (~5 min). Does NOT wait on the Bitcoin/OpenTimestamps anchor — that confirms 1–6h later asynchronously; subscribe to the ots.upgraded webhook for it. Adds CI minutes; defaults to false.'
     required: false
     default: 'false'
   poll-timeout-seconds:
@@ -41,9 +41,9 @@ outputs:
   stamps:
     description: 'JSON-encoded array of stamped items: { ownershipId, stampId, contentHash, fileName, anchored, txHash? }.'
   pending-count:
-    description: 'Number of stamps still pending. 0 when wait-for-anchor=true completed successfully.'
+    description: 'Number of stamps not yet Polygon-anchored at exit. 0 when wait-for-anchor=true completed successfully.'
   anchored-count:
-    description: 'Number of stamps fully anchored on Polygon at exit.'
+    description: 'Number of stamps Polygon-anchored at exit. Bitcoin/OTS confirmation lands later asynchronously.'
   credits-charged:
     description: 'Total credits charged across all batches in this run.'
 
