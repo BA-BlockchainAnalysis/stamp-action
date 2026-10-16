@@ -55,6 +55,10 @@ That's it. The action hashes each file, posts the hashes to BA Stamp, and writes
 | `poll-timeout-seconds` | no | `900` | How long to wait when `wait-for-anchor=true`. |
 | `output-json` | no | `bastamp-proofs.json` | Where to write the proofs JSON. |
 | `api-base` | no | `https://bastamp.com/api/v1` | Override for testing or self-host. |
+| `download-certificates` | no | `false` | Download each **anchored** stamp's certificate PDF into `certificates-dir`. Certificates exist only once anchored, so pair with `wait-for-anchor: true`. Implied by `attach-to-release`. |
+| `certificates-dir` | no | `bastamp-certificates` | Directory for the downloaded certificate PDFs. |
+| `attach-to-release` | no | — | A release tag. When set, the downloaded certificate PDFs are uploaded as assets on that release. Implies `download-certificates`; needs `github-token` and `contents: write`. |
+| `github-token` | no | — | Token used to upload release assets. Pass `${{ github.token }}`. |
 
 ## Outputs
 
@@ -64,6 +68,7 @@ That's it. The action hashes each file, posts the hashes to BA Stamp, and writes
 | `pending-count` | Stamps not yet Polygon-anchored at exit. `0` when `wait-for-anchor=true` succeeded. |
 | `anchored-count` | Stamps Polygon-anchored at exit. (Bitcoin/OTS confirmation lands later asynchronously.) |
 | `credits-charged` | Total credits charged for this run. |
+| `certificates` | JSON array `[{ contentHash, fileName, path }]` of downloaded certificate PDFs. Empty unless `download-certificates` / `attach-to-release` is set. |
 
 ## Idempotency — safe to retry
 
@@ -105,6 +110,40 @@ jobs:
         with:
           files: bastamp-proofs.json
 ```
+
+### Attach the certificate PDFs to the release
+
+The proof JSON is available immediately, but the **certificate PDF** only exists
+once the stamp is anchored (Polygon, ~5 min). `wait-for-anchor` +
+`attach-to-release` waits for the anchor, downloads each certificate, and uploads
+it to the release as an asset — in one step:
+
+```yaml
+on:
+  release:
+    types: [published]
+
+jobs:
+  stamp:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required to upload release assets
+    steps:
+      - uses: actions/checkout@v4
+      - uses: BA-BlockchainAnalysis/stamp-action@v1
+        with:
+          api-key: ${{ secrets.BASTAMP_API_KEY }}
+          files: dist/*.tar.gz
+          jurisdiction: IT
+          wait-for-anchor: true
+          attach-to-release: ${{ github.event.release.tag_name }}
+          github-token: ${{ github.token }}
+```
+
+Don't want to hold the workflow open for ~5 minutes? Collect the certificates
+out-of-band instead: subscribe to the [`stamp.anchored` webhook](https://bastamp.com/docs/api),
+and download + attach the PDF when the event fires. The "Attach the certificate to
+a GitHub release" recipe in the [API docs](https://bastamp.com/docs/api) has both patterns.
 
 ### Stamp every commit on main
 
