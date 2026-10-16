@@ -36,6 +36,22 @@ inputs:
     description: 'Override API base URL. Defaults to https://bastamp.com/api/v1.'
     required: false
     default: 'https://bastamp.com/api/v1'
+  download-certificates:
+    description: 'If true, download the certificate PDF of every anchored stamp into certificates-dir. Certificates only exist once anchored, so pair this with wait-for-anchor: true. Implied by attach-to-release.'
+    required: false
+    default: 'false'
+  certificates-dir:
+    description: 'Directory to write downloaded certificate PDFs into. Default: bastamp-certificates.'
+    required: false
+    default: 'bastamp-certificates'
+  attach-to-release:
+    description: 'A release tag (e.g. the tag that triggered the workflow). When set, the downloaded certificate PDFs are uploaded as assets on that release. Implies download-certificates. Requires github-token with contents: write.'
+    required: false
+    default: ''
+  github-token:
+    description: 'Token used to upload release assets when attach-to-release is set. Pass ${{ github.token }} and give the job contents: write permission.'
+    required: false
+    default: ''
 
 outputs:
   stamps:
@@ -46,6 +62,8 @@ outputs:
     description: 'Number of stamps Polygon-anchored at exit. Bitcoin/OTS confirmation lands later asynchronously.'
   credits-charged:
     description: 'Total credits charged across all batches in this run.'
+  certificates:
+    description: 'JSON-encoded array of downloaded certificates: { contentHash, fileName, path }. Empty unless download-certificates (or attach-to-release) is set.'
 
 runs:
   using: 'node20'

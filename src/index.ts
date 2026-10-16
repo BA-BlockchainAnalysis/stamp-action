@@ -2,8 +2,8 @@ import * as core from "@actions/core";
 import * as glob from "@actions/glob";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { writeFile } from "node:fs/promises";
-import { basename } from "node:path";
+import { writeFile, readFile, mkdir } from "node:fs/promises";
+import { basename, join } from "node:path";
 
 const BATCH_SIZE = 100;
 const POLL_INTERVAL_MS = 30_000;
@@ -46,6 +46,12 @@ async function main(): Promise<void> {
   const pollTimeoutSeconds = Number(core.getInput("poll-timeout-seconds") || "900");
   const outputJsonPath = core.getInput("output-json") || "bastamp-proofs.json";
   const apiBase = (core.getInput("api-base") || "https://bastamp.com/api/v1").replace(/\/$/, "");
+  const certificatesDir = core.getInput("certificates-dir") || "bastamp-certificates";
+  const attachToReleaseTag = core.getInput("attach-to-release").trim();
+  const githubToken = core.getInput("github-token");
+  // attach-to-release implies downloading the certificates (we can only attach
+  // what we have fetched).
+  const downloadCertificates = core.getBooleanInput("download-certificates") || !!attachToReleaseTag;
   const runId = process.env.GITHUB_RUN_ID || `local-${Date.now()}`;
 
   if (!/^ba_(live|test)_[0-9a-f]{32}$/.test(apiKey)) {
@@ -154,6 +160,58 @@ async function main(): Promise<void> {
   core.setOutput("anchored-count", String(anchoredCount));
   core.setOutput("credits-charged", String(totalCharged));
 
+  // Collect certificates for the anchored stamps, and optionally attach them to
+  // a GitHub release. The certificate only exists once a stamp is anchored, so
+  // without wait-for-anchor we can only collect the ones that anchored in time.
+  if (downloadCertificates) {
+    const anchored = enriched.filter((e) => e.anchored);
+    if (anchored.length === 0) {
+      core.warning(
+        "download-certificates: no stamps are anchored yet, so there is nothing to download. " +
+          "Set wait-for-anchor: true — certificates are only available once a stamp is anchored.",
+      );
+    } else {
+      if (pendingCount > 0) {
+        core.warning(
+          `download-certificates: ${pendingCount} stamp(s) are still pending and were skipped. ` +
+            "Set wait-for-anchor: true to collect every certificate.",
+        );
+      }
+      await mkdir(certificatesDir, { recursive: true });
+      const certs: { contentHash: string; fileName: string | null; path: string }[] = [];
+      for (const e of anchored) {
+        const base = sanitizeFilename(e.fileName ?? e.contentHash);
+        const dest = join(certificatesDir, `${base}-${e.contentHash.slice(2, 10)}.certificate.pdf`);
+        try {
+          await downloadCertificate(apiBase, apiKey, e.contentHash, dest);
+          certs.push({ contentHash: e.contentHash, fileName: e.fileName, path: dest });
+          core.info(`  saved ${dest}`);
+        } catch (err) {
+          core.warning(`certificate download failed for ${e.contentHash}: ${(err as Error).message}`);
+        }
+      }
+      core.setOutput("certificates", JSON.stringify(certs));
+      core.info(`downloaded ${certs.length} certificate(s) → ${certificatesDir}/`);
+
+      if (attachToReleaseTag && certs.length > 0) {
+        const repo = process.env.GITHUB_REPOSITORY || "";
+        if (!githubToken) {
+          core.warning(
+            "attach-to-release is set but github-token is empty; skipping upload. Pass github-token: ${{ github.token }}.",
+          );
+        } else if (!repo) {
+          core.warning("attach-to-release is set but GITHUB_REPOSITORY is not available; skipping upload.");
+        } else {
+          try {
+            await attachToRelease(githubToken, repo, attachToReleaseTag, certs.map((c) => c.path));
+          } catch (err) {
+            core.warning(`attach-to-release failed: ${(err as Error).message}`);
+          }
+        }
+      }
+    }
+  }
+
   if (waitForAnchor && pendingCount > 0) {
     core.setFailed(
       `wait-for-anchor timed out: ${pendingCount}/${enriched.length} stamps still pending after ${pollTimeoutSeconds}s. ` +
@@ -228,6 +286,68 @@ async function waitForAnchors(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 100) || "certificate";
+}
+
+async function downloadCertificate(
+  apiBase: string,
+  apiKey: string,
+  hash: string,
+  dest: string,
+): Promise<void> {
+  const res = await fetch(`${apiBase}/stamps/${hash}/certificate`, {
+    headers: { "Authorization": `Bearer ${apiKey}`, "User-Agent": "stamp-action/1.0" },
+  });
+  if (!res.ok) {
+    throw new Error(res.status === 409 ? "not anchored yet" : `HTTP ${res.status}`);
+  }
+  await writeFile(dest, Buffer.from(await res.arrayBuffer()));
+}
+
+// Upload the certificate PDFs as assets on an existing GitHub release (resolved
+// by tag). Uses the REST API directly — no extra dependency. Individual upload
+// failures (e.g. an asset of the same name already exists, HTTP 422) are warned
+// and skipped rather than failing the whole run.
+async function attachToRelease(
+  token: string,
+  repo: string,
+  tag: string,
+  filePaths: string[],
+): Promise<void> {
+  const [owner, name] = repo.split("/");
+  const ghHeaders = {
+    "Authorization": `Bearer ${token}`,
+    "Accept": "application/vnd.github+json",
+    "User-Agent": "stamp-action/1.0",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const relRes = await fetch(
+    `https://api.github.com/repos/${owner}/${name}/releases/tags/${encodeURIComponent(tag)}`,
+    { headers: ghHeaders },
+  );
+  if (!relRes.ok) {
+    throw new Error(`release for tag "${tag}" not found (HTTP ${relRes.status})`);
+  }
+  const rel = (await relRes.json()) as { upload_url: string };
+  const uploadBase = rel.upload_url.replace(/\{[^}]*\}$/, "");
+  for (const path of filePaths) {
+    const assetName = basename(path);
+    const data = await readFile(path);
+    const up = await fetch(`${uploadBase}?name=${encodeURIComponent(assetName)}`, {
+      method: "POST",
+      headers: { ...ghHeaders, "Content-Type": "application/pdf" },
+      body: new Uint8Array(data),
+    });
+    if (up.ok) {
+      core.info(`  attached ${assetName} to release ${tag}`);
+    } else {
+      const detail = (await up.text().catch(() => "")).slice(0, 150);
+      core.warning(`attach ${assetName}: HTTP ${up.status} ${detail}`);
+    }
+  }
 }
 
 main().catch((e) => {
