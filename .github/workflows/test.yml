@@ -1,7 +1,8 @@
 name: End-to-end smoke test
 
-# Manual trigger only — running this charges credits from BASTAMP_API_KEY's
-# account. Don't wire it on push or schedule.
+# Manual trigger only — running this charges one credit from BASTAMP_API_KEY's
+# account and creates (then deletes) a throwaway prerelease. Don't wire it on
+# push or schedule.
 on:
   workflow_dispatch:
 
@@ -9,22 +10,31 @@ jobs:
   stamp:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # create the throwaway release, attach the cert, delete it
+    env:
+      TEST_TAG: e2e-${{ github.run_id }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate unique test artifacts
+      - name: Generate a unique test artifact
         run: |
           mkdir -p test-artifacts
-          printf "smoke test artifact A — run %s\n" "${{ github.run_id }}" > test-artifacts/a.txt
-          printf "smoke test artifact B — run %s — %s\n" "${{ github.run_id }}" "$(date -u +%s%N)" > test-artifacts/b.txt
-          ls -la test-artifacts
+          printf "stamp-action E2E — run %s — %s\n" "${{ github.run_id }}" "$(date -u +%s%N)" > test-artifacts/a.txt
           sha256sum test-artifacts/*.txt
 
+      - name: Create a throwaway prerelease to attach to
+        run: |
+          gh release create "$TEST_TAG" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "stamp-action E2E $TEST_TAG" \
+            --notes "Throwaway release for the stamp-action end-to-end test. Safe to delete."
+
       # Reference the action via local path so the test exercises the *current*
-      # checkout, not the published @v1 tag. Catches drift between src/ and
-      # dist/ that the lint job might miss.
-      - name: Run stamp-action against itself
+      # checkout, not the published @v1 tag. Full flow: stamp, wait for the
+      # Polygon anchor, download the certificate, attach it to the release.
+      - name: Run stamp-action (stamp + wait + download cert + attach)
         id: stamp
         uses: ./
         with:
@@ -33,20 +43,29 @@ jobs:
             test-artifacts/*.txt
           jurisdiction: IT
           locale: en
-          wait-for-anchor: false
+          wait-for-anchor: true
+          poll-timeout-seconds: '900'
+          download-certificates: true
+          attach-to-release: ${{ env.TEST_TAG }}
+          github-token: ${{ github.token }}
 
       - name: Show outputs
         run: |
-          echo "pending-count : ${{ steps.stamp.outputs.pending-count }}"
-          echo "anchored-count: ${{ steps.stamp.outputs.anchored-count }}"
+          echo "anchored-count : ${{ steps.stamp.outputs.anchored-count }}"
+          echo "pending-count  : ${{ steps.stamp.outputs.pending-count }}"
           echo "credits-charged: ${{ steps.stamp.outputs.credits-charged }}"
-          echo
+          echo "certificates   : ${{ steps.stamp.outputs.certificates }}"
           echo "--- proofs JSON ---"
           cat bastamp-proofs.json
 
-      - name: Upload proofs artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bastamp-proofs-${{ github.run_id }}
-          path: bastamp-proofs.json
-          retention-days: 7
+      - name: Verify the certificate landed on the release
+        run: |
+          assets=$(gh release view "$TEST_TAG" --json assets -q '.assets[].name')
+          echo "release assets:"; echo "$assets"
+          echo "$assets" | grep -q '\.certificate\.pdf$' \
+            || { echo "::error::no .certificate.pdf asset found on the release"; exit 1; }
+          echo "OK — certificate attached to the release"
+
+      - name: Clean up the throwaway release
+        if: always()
+        run: gh release delete "$TEST_TAG" --yes --cleanup-tag || true
