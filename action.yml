@@ -49,7 +49,7 @@ inputs:
     required: false
     default: ''
   github-token:
-    description: 'Token used to upload release assets when attach-to-release is set. Pass ${{ github.token }} and give the job contents: write permission.'
+    description: 'Token used to upload release assets when attach-to-release is set. Pass the workflow token (github.token) and give the job contents: write permission.'
     required: false
     default: ''
 
